@@ -1,0 +1,8 @@
+{
+  "name": "cadence-musculation",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --test tests/analytics.test.js tests/charts.test.js tests/muscles.test.js tests/storage.test.js tests/timer.test.js"
+  }
+}
