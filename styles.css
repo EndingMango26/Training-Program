@@ -861,3 +861,68 @@ a { color: inherit; text-decoration: none; }
   .resume-banner { gap: 6px; font-size: 9px; }
   .muscle-select-chip { font-size: 8px; }
 }
+
+/* Session editing, faster history navigation, and discoverable chart values. */
+.calendar-top { align-items: flex-start; gap: 12px; }
+.calendar-heading { min-width: 0; display: flex; flex-direction: column; align-items: flex-start; gap: 9px; }
+.calendar-jump { display: flex; flex-direction: column; gap: 4px; color: var(--muted); font-size: 8px; }
+.calendar-jump input { width: 138px; padding: 6px 8px; border: 1px solid var(--line); border-radius: 7px; background: var(--surface-2); color: var(--text); font: inherit; }
+.calendar-controls { align-items: center; gap: 7px !important; }
+.calendar-arrows { display: flex; gap: 5px; }
+.calendar-today { min-height: 29px; padding: 0 9px; font-size: 9px; }
+.calendar-day.no-workout:disabled { color: var(--dim); cursor: default; opacity: .72; }
+.calendar-day.is-selected { outline: 2px solid var(--accent); outline-offset: 1px; background: #3d4d34; }
+.calendar-count { position: absolute; top: 2px; right: 2px; min-width: 10px; height: 10px; display: grid; place-items: center; border-radius: 8px; background: var(--accent); color: #182014; font-size: 7px; line-height: 1; }
+.history-list-actions, .journal-form-actions { display: flex; align-items: center; gap: 7px; }
+.history-filter-count { margin: -5px 2px 9px; color: var(--muted); font-size: 9px; }
+.session-detail-actions, .session-edit-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; margin-top: 16px; padding-top: 14px; border-top: 1px solid var(--line); }
+.button-danger { color: #ffe8e5; border-color: #75463c; background: #492923; }
+.button-danger:hover { background: #60352e; }
+.session-edit-form { width: min(820px, 100%); }
+.session-edit-meta { display: grid; grid-template-columns: .65fr 1.2fr .7fr; gap: 10px; margin-top: 17px; }
+.session-note-field { display: block; margin-top: 11px; }
+.session-edit-exercises { display: grid; gap: 9px; margin-top: 14px; }
+.session-edit-exercise { min-width: 0; margin: 0; padding: 10px; border: 1px solid var(--line); border-radius: 11px; background: var(--surface-2); }
+.session-edit-exercise legend { padding: 0 6px; color: var(--text); font-size: 10px; font-weight: 700; }
+.session-edit-sets { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+.session-edit-set { display: grid; grid-template-columns: .55fr 1fr 1fr; align-items: end; gap: 7px; padding: 8px; border-radius: 8px; background: var(--surface); }
+.session-edit-set > b { align-self: center; color: var(--accent); font-size: 8px; }
+.session-edit-set label { min-width: 0; color: var(--muted); font-size: 8px; }
+.session-edit-set input:not([type="checkbox"]) { width: 100%; min-width: 0; margin-top: 4px; padding: 7px 6px; border: 1px solid var(--line); border-radius: 6px; background: var(--bg); color: var(--text); font-size: 10px; }
+.session-edit-set .session-set-check { display: flex; align-items: center; gap: 5px; grid-column: 2 / -1; }
+.session-set-check input { accent-color: var(--accent); }
+.journal-entry-body { flex: 1; }
+.journal-edit-button { margin-top: 9px; }
+.chart-card { overflow: visible; }
+.chart-shell { position: relative; width: 100%; isolation: isolate; }
+.chart-point { cursor: help; outline: none; }
+.chart-point circle { transition: r .12s ease, stroke-width .12s ease; }
+.chart-point:hover circle, .chart-point:focus circle { r: 7px; stroke: var(--text); stroke-width: 2; }
+.chart-point.chart-bar .chart-bar-hit-area { fill: transparent; pointer-events: all; }
+.chart-point.chart-bar:hover .chart-marker, .chart-point.chart-bar:focus .chart-marker { fill: var(--accent-2); }
+.chart-tooltip { position: absolute; z-index: 8; max-width: min(240px, calc(100vw - 32px)); padding: 8px 10px; border: 1px solid #53634b; border-radius: 9px; background: #121813; color: #f2f5ed; box-shadow: 0 8px 24px #0008; font-size: 10px; font-weight: 650; line-height: 1.4; text-align: center; pointer-events: none; transform: translate(-50%, -100%); white-space: normal; }
+.chart-tooltip.below { transform: translate(-50%, 0); }
+.chart-tooltip[hidden] { display: none; }
+.theme-light .calendar-jump input, .theme-light .session-edit-set input:not([type="checkbox"]) { border-color: #d4ddd0; background: #f5f7f1; color: #263126; }
+.theme-light .calendar-day.is-selected { background: #e2ebd8; }
+.theme-light .calendar-count { color: #182014; }
+.theme-light .session-edit-exercise { background: #f1f5ed; }
+.theme-light .session-edit-set { background: #fff; }
+.theme-light .session-edit-set > b { color: #58763b; }
+.theme-light .button-danger { color: #7c3028; border-color: #ebc9c3; background: #fff0ed; }
+.theme-light .chart-tooltip { border-color: #cbd7c4; background: #fff; color: #263126; box-shadow: 0 8px 24px #26312626; }
+@media (max-width: 620px) {
+  .calendar-top { flex-wrap: wrap; }
+  .calendar-heading { flex: 1; }
+  .calendar-controls { margin-left: auto; }
+  .calendar-jump input { width: 126px; }
+  .session-edit-meta { grid-template-columns: 1fr 1fr; }
+  .session-edit-meta .field-label:nth-child(2) { grid-column: 1 / -1; grid-row: 1; }
+  .session-edit-sets { grid-template-columns: 1fr; }
+  .session-edit-actions, .session-detail-actions { flex-direction: column-reverse; }
+  .session-edit-actions .button, .session-detail-actions .button { width: 100%; }
+  .form-footer { align-items: stretch; }
+  .journal-form-actions { width: 100%; flex-direction: column-reverse; }
+  .journal-form-actions .button { width: 100%; }
+  .history-list-actions { flex: none; }
+}

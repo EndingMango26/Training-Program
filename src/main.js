@@ -13,6 +13,8 @@ let libraryQuery = '';
 let range = 'month';
 let selectedExercise = 'pushups';
 let selectedSession = null;
+let editingSessionId = null;
+let editingJournalId = null;
 let selectedMuscle = 'pectorals';
 let muscleView = 'front';
 let muscleRange = '30days';
@@ -27,6 +29,7 @@ let journalSessionId = null;
 let cooldownHighlights = [];
 let finishReviewOpen = false;
 let calendarCursor = new Date();
+let calendarSelectedDate = '';
 let toastTimer;
 let timerInterval;
 let routineTimerInterval;
@@ -40,6 +43,7 @@ const pageTitles = { home: 'Vue d’ensemble', program: 'Ton programme', exercis
 const h = value => String(value ?? '').replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[char]);
 const uid = () => globalThis.crypto?.randomUUID?.() || `id-${Date.now()}-${Math.random().toString(16).slice(2)}`;
 const formatDate = (value, options = { day: 'numeric', month: 'long', year: 'numeric' }) => new Intl.DateTimeFormat('fr-FR', options).format(new Date(value));
+const dateTimeLocalValue = value => { const date = new Date(value); return new Date(date.getTime() - date.getTimezoneOffset() * 60000).toISOString().slice(0, 16); };
 const formatDuration = seconds => {
   const total = Math.max(0, Math.floor(Number(seconds) || 0));
   return total < 60 ? `${total} s` : `${Math.floor(total / 60)} min${total % 60 ? ` ${String(total % 60).padStart(2, '0')} s` : ''}`;
@@ -72,6 +76,28 @@ function showToast(message, kind = 'success') {
   element.textContent = message;
   element.classList.add('toast-visible');
   clearTimeout(toastTimer); toastTimer = setTimeout(() => element.classList.remove('toast-visible'), 3600);
+}
+
+function showChartTooltip(point) {
+  const shell = point.closest('.chart-shell');
+  const tooltip = shell?.querySelector('.chart-tooltip');
+  if (!shell || !tooltip) return;
+  tooltip.textContent = point.dataset.chartTooltip || '';
+  tooltip.hidden = false;
+  const shellRect = shell.getBoundingClientRect();
+  const marker = point.querySelector('.chart-marker') || point;
+  const pointRect = marker.getBoundingClientRect();
+  const tooltipWidth = tooltip.offsetWidth;
+  const center = pointRect.left - shellRect.left + pointRect.width / 2;
+  const left = Math.min(shellRect.width - tooltipWidth / 2 - 6, Math.max(tooltipWidth / 2 + 6, center));
+  const above = pointRect.top - shellRect.top > tooltip.offsetHeight + 18;
+  tooltip.classList.toggle('below', !above);
+  tooltip.style.left = `${left}px`;
+  tooltip.style.top = `${above ? pointRect.top - shellRect.top - 8 : pointRect.bottom - shellRect.top + 8}px`;
+}
+
+function chartPointFrom(target) {
+  return target instanceof Element ? target.closest('[data-chart-tooltip]') : null;
 }
 
 function icon(label) {
@@ -142,9 +168,11 @@ function modalMarkup() {
   if (selectedSession) {
     const session = data.sessions.find(item => item.id === selectedSession);
     if (!session) return '';
+    if (editingSessionId === session.id) return sessionEditMarkup(session);
     const performed = session.exercises.map(item => `<div class="detail-exercise"><div><strong>${h(item.name)}</strong><small>${(item.sets || []).filter(set => set.completed).length} série(s) validée(s)</small></div><div class="detail-set-list">${(item.sets || []).map((set, index) => `<span>S${index + 1} · ${Number(set.reps) || 0}${item.duration ? ' s' : ' rép.'}${Number(set.load) ? ` · ${Number(set.load)} kg` : ''}${set.completed ? ' ✓' : ''}</span>`).join('')}</div>${item.note ? `<p>${h(item.note)}</p>` : ''}</div>`).join('');
     const journal = data.journalEntries.find(item => item.sessionId === session.id);
-    return `<div class="modal-backdrop" data-action="close-modal"><section class="modal-card" role="dialog" aria-modal="true" aria-labelledby="modal-title"><button class="modal-close" data-action="close-modal">${icon('close')}</button><div class="modal-kicker">BILAN DE SÉANCE · ${h(session.type)}</div><h2 id="modal-title">Séance ${h(session.type)} du ${h(formatDate(session.completedAt))}</h2><p class="muted">${formatDuration(session.durationSeconds)} · ${session.exercises.length} exercices · ${session.exercises.reduce((sum, exercise) => sum + (exercise.sets || []).filter(set => set.completed).length, 0)} séries validées</p><div class="detail-list">${performed || '<p class="muted">Aucun exercice enregistré.</p>'}</div>${session.note ? `<div class="note-block"><b>Note de séance</b><p>${h(session.note)}</p></div>` : ''}${journal ? `<div class="note-block"><b>Journal · ${h(journal.mood || 'Ressenti non renseigné')}</b><p>${h(journal.notes || 'Aucune observation.')}</p>${journal.pain ? `<p class="pain-note">Gêne signalée : ${h(journal.pain)}</p>` : ''}</div>` : ''}</section></div>`;
+    const journalDetails = journal ? `<div class="note-block"><b>Ressenti · ${h(journal.mood || 'non renseigné')}</b><div class="journal-badges">${journal.difficulty ? `<span>Effort : ${h(journal.difficulty)}</span>` : ''}${journal.energy ? `<span>Énergie : ${h(journal.energy)}</span>` : ''}</div>${journal.pain ? `<p class="pain-note">Gêne : ${h(journal.pain)}</p>` : ''}${journal.notes ? `<p>${h(journal.notes)}</p>` : ''}${journal.nextGoal ? `<p><b>Prochaine intention</b> · ${h(journal.nextGoal)}</p>` : ''}<button class="button button-small button-secondary" data-action="edit-journal" data-id="${h(journal.id)}">Modifier le ressenti</button></div>` : `<div class="note-block"><b>Ressenti</b><p>Aucune note n’est encore associée à cette séance.</p><button class="button button-small button-secondary" data-action="open-journal-for-session" data-id="${h(session.id)}">Ajouter un ressenti</button></div>`;
+    return `<div class="modal-backdrop" data-action="close-modal"><section class="modal-card" role="dialog" aria-modal="true" aria-labelledby="modal-title"><button class="modal-close" data-action="close-modal" aria-label="Fermer">${icon('close')}</button><div class="modal-kicker">BILAN DE SÉANCE · ${h(session.type)}</div><h2 id="modal-title">Séance ${h(session.type)} du ${h(formatDate(session.completedAt, { day: 'numeric', month: 'long', year: 'numeric', hour: '2-digit', minute: '2-digit' }))}</h2><p class="muted">${formatDuration(session.durationSeconds)} · ${session.exercises.length} exercices · ${session.exercises.reduce((sum, exercise) => sum + (exercise.sets || []).filter(set => set.completed).length, 0)} séries validées</p><div class="detail-list">${performed || '<p class="muted">Aucun exercice enregistré.</p>'}</div>${session.note ? `<div class="note-block"><b>Note de séance</b><p>${h(session.note)}</p></div>` : ''}${journalDetails}<div class="session-detail-actions"><button class="button button-secondary" data-action="edit-session" data-id="${h(session.id)}">Modifier la séance</button><button class="button button-danger" data-action="delete-session" data-id="${h(session.id)}">Supprimer la séance</button></div></section></div>`;
   }
   if (selectedExercise) {
     const exercise = getExercise(selectedExercise);
@@ -153,6 +181,11 @@ function modalMarkup() {
     return `<div class="modal-backdrop" data-action="close-exercise"><section class="modal-card exercise-modal" role="dialog" aria-modal="true" aria-labelledby="exercise-modal-title"><button class="modal-close" data-action="close-exercise">${icon('close')}</button><div class="exercise-modal-art">${exercise.illustration}</div><div class="modal-kicker">${h(exercise.category)} · ${h(exercise.dosage)}</div><h2 id="exercise-modal-title">${h(exercise.name)}</h2><p class="muted">${h(exercise.description)}</p><div class="muscle-row">${exercise.muscles.map(muscle => `<span>${h(muscle)}</span>`).join('')}</div><div class="detail-columns"><div><h3>Comment faire</h3><ol>${exercise.steps.map(step => `<li>${h(step)}</li>`).join('')}</ol></div><div><h3>À garder en tête</h3><ul>${exercise.tips.map(tip => `<li>${h(tip)}</li>`).join('')}</ul></div></div><div class="variant-grid"><div><small>VARIANTE PLUS FACILE</small><p>${h(exercise.easier)}</p></div><div><small>POUR PROGRESSER</small><p>${h(exercise.harder)}</p></div></div><div class="note-block"><b>Erreurs fréquentes</b><p>${exercise.errors.map(error => h(error)).join(' · ')}</p></div>${exerciseProgressPanel(exercise.id)}</section></div>`;
   }
   return '';
+}
+
+function sessionEditMarkup(session) {
+  const exerciseFields = session.exercises.map((exercise, exerciseIndex) => `<fieldset class="session-edit-exercise"><legend>${h(exercise.name)}</legend><div class="session-edit-sets">${exercise.sets.map((set, setIndex) => `<div class="session-edit-set"><b>Série ${setIndex + 1}</b><label>${exercise.duration ? 'Secondes' : 'Répétitions'}<input type="number" min="0" step="1" name="reps-${exerciseIndex}-${setIndex}" value="${Math.max(0, Number(set.reps) || 0)}" required></label><label>Charge (kg)<input type="number" min="0" step="0.5" name="load-${exerciseIndex}-${setIndex}" value="${Math.max(0, Number(set.load) || 0)}"></label><label class="session-set-check"><input type="checkbox" name="completed-${exerciseIndex}-${setIndex}" ${set.completed ? 'checked' : ''}> Validée</label></div>`).join('')}</div></fieldset>`).join('');
+  return `<div class="modal-backdrop" data-action="close-modal"><form class="modal-card session-edit-form" data-form="edit-session" data-id="${h(session.id)}" role="dialog" aria-modal="true" aria-labelledby="session-edit-title"><button type="button" class="modal-close" data-action="cancel-session-edit" aria-label="Fermer">${icon('close')}</button><div class="modal-kicker">HISTORIQUE · MODIFICATION</div><h2 id="session-edit-title">Modifier la séance</h2><div class="session-edit-meta"><label class="field-label">Type<select name="type"><option value="A" ${session.type === 'A' ? 'selected' : ''}>Séance A</option><option value="B" ${session.type === 'B' ? 'selected' : ''}>Séance B</option></select></label><label class="field-label">Date et heure<input type="datetime-local" name="completedAt" value="${h(dateTimeLocalValue(session.completedAt))}" required></label><label class="field-label">Durée (secondes)<input type="number" min="0" step="1" name="durationSeconds" value="${Math.max(0, Number(session.durationSeconds) || 0)}" required></label></div><label class="field-label session-note-field">Note de séance<textarea name="note" rows="2" placeholder="Ajouter une note…">${h(session.note || '')}</textarea></label><div class="session-edit-exercises">${exerciseFields}</div><div class="session-edit-actions"><button type="button" class="button button-ghost" data-action="cancel-session-edit">Annuler</button><button type="submit" class="button button-primary">Enregistrer les modifications</button></div></form></div>`;
 }
 
 function homePage() {
@@ -341,22 +374,45 @@ function calendarMarkup() {
   const year = calendarCursor.getFullYear(), month = calendarCursor.getMonth();
   const first = new Date(year, month, 1), offset = (first.getDay() + 6) % 7;
   const days = new Date(year, month + 1, 0).getDate();
-  const workoutDays = new Set(data.sessions.map(session => dayKey(session.completedAt)));
+  const workoutCounts = new Map();
+  data.sessions.forEach(session => { const key = dayKey(session.completedAt); workoutCounts.set(key, (workoutCounts.get(key) || 0) + 1); });
   const blanks = Array.from({ length: offset }, () => '<span class="calendar-blank"></span>').join('');
-  const cells = Array.from({ length: days }, (_, index) => { const day = index + 1, key = dayKey(new Date(year, month, day)); const today = key === dayKey(new Date()); return `<button class="calendar-day ${workoutDays.has(key) ? 'has-workout' : ''} ${today ? 'is-today' : ''}" ${workoutDays.has(key) ? `data-action="calendar-day" data-date="${key}"` : 'tabindex="-1"'}>${day}${workoutDays.has(key) ? '<i></i>' : ''}</button>`; }).join('');
-  return `<div class="calendar-top"><h3>${formatDate(first, { month: 'long', year: 'numeric' })}</h3><div><button class="calendar-arrow" data-action="calendar-month" data-delta="-1" aria-label="Mois précédent">‹</button><button class="calendar-arrow" data-action="calendar-month" data-delta="1" aria-label="Mois suivant">›</button></div></div><div class="calendar-weekdays">${['L', 'M', 'M', 'J', 'V', 'S', 'D'].map(day => `<span>${day}</span>`).join('')}</div><div class="calendar-grid">${blanks}${cells}</div><div class="calendar-legend"><span><i></i> Séance effectuée</span><span>${data.sessions.filter(session => new Date(session.completedAt).getMonth() === month && new Date(session.completedAt).getFullYear() === year).length} séance(s) ce mois</span></div>`;
+  const cells = Array.from({ length: days }, (_, index) => {
+    const day = index + 1, date = new Date(year, month, day, 12), key = dayKey(date);
+    const today = key === dayKey(new Date()), count = workoutCounts.get(key) || 0;
+    const label = `${formatDate(date, { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })} · ${count ? `${count} séance(s)` : 'aucune séance'}`;
+    return `<button class="calendar-day ${count ? 'has-workout' : 'no-workout'} ${today ? 'is-today' : ''} ${calendarSelectedDate === key ? 'is-selected' : ''}" ${count ? `data-action="calendar-day" data-date="${key}"` : 'disabled'} aria-label="${h(label)}" ${count ? `title="${h(label)}"` : ''}>${day}${count ? `<span class="calendar-count">${count > 1 ? count : '•'}</span>` : ''}</button>`;
+  }).join('');
+  const monthTotal = data.sessions.filter(session => { const date = new Date(session.completedAt); return date.getMonth() === month && date.getFullYear() === year; }).length;
+  const monthValue = `${year}-${String(month + 1).padStart(2, '0')}`;
+  return `<div class="calendar-top"><div class="calendar-heading"><h3>${formatDate(first, { month: 'long', year: 'numeric' })}</h3><label class="calendar-jump"><span>Aller à un mois</span><input type="month" id="history-month-picker" value="${monthValue}" aria-label="Choisir un mois"></label></div><div class="calendar-controls"><button class="button button-small button-secondary calendar-today" data-action="calendar-today">Aujourd’hui</button><div class="calendar-arrows"><button class="calendar-arrow" data-action="calendar-month" data-delta="-1" aria-label="Mois précédent">‹</button><button class="calendar-arrow" data-action="calendar-month" data-delta="1" aria-label="Mois suivant">›</button></div></div></div><div class="calendar-weekdays">${['L', 'M', 'M', 'J', 'V', 'S', 'D'].map(day => `<span>${day}</span>`).join('')}</div><div class="calendar-grid">${blanks}${cells}</div><div class="calendar-legend"><span><i></i> Jour avec séance</span><span>${monthTotal} séance(s) ce mois</span></div>`;
 }
 
 function historyPage() {
   const sessions = [...data.sessions].sort((a, b) => Date.parse(b.completedAt) - Date.parse(a.completedAt));
-  return `<section class="history-summary"><div><span class="section-kicker">TON PARCOURS</span><h2>Chaque séance<br><em>compte.</em></h2><p>Retrouve tes entraînements et tes notes personnelles.</p></div><div class="history-total"><strong>${sessions.length}</strong><span>${sessions.length === 1 ? 'séance enregistrée' : 'séances enregistrées'}</span></div></section><div class="history-layout"><section class="panel calendar-panel">${calendarMarkup()}</section><section class="history-list"><div class="section-header"><div><span class="section-kicker">RÉCENTES</span><h3>Tes séances</h3></div><button class="button button-small button-secondary" data-action="export">Exporter</button></div>${sessions.length ? sessions.map(session => `<button class="history-item" data-action="open-session" data-id="${h(session.id)}"><span class="history-date-badge"><b>${new Date(session.completedAt).getDate()}</b><small>${formatDate(session.completedAt, { month: 'short' })}</small></span><span class="history-item-main"><span class="history-line"><b>Séance ${h(session.type)}</b><span class="type-pill type-${h(session.type).toLowerCase()}">${h(session.type)}</span></span><small>${session.exercises.length} exercices · ${formatDuration(session.durationSeconds)} · ${session.exercises.reduce((sum, ex) => sum + ex.sets.filter(set => set.completed).length, 0)} séries</small><span class="history-exercises">${session.exercises.map(exercise => h(exercise.name)).join(' · ')}</span></span><span class="row-chevron">›</span></button>`).join('') : `<div class="empty-state compact-empty"><span>▦</span><h3>Ton historique commence ici.</h3><p>Une séance terminée apparaîtra dans ce journal.</p><button class="button button-primary" data-action="start-workout" data-type="${nextType()}">Commencer la séance ${nextType()}</button></div>`}</section></div>`;
+  const visibleSessions = calendarSelectedDate ? sessions.filter(session => dayKey(session.completedAt) === calendarSelectedDate) : sessions;
+  const selectedDate = calendarSelectedDate ? new Date(`${calendarSelectedDate}T12:00:00`) : null;
+  const listTitle = selectedDate ? `Séances du ${formatDate(selectedDate, { day: 'numeric', month: 'long', year: 'numeric' })}` : 'Tes séances';
+  const sessionCards = visibleSessions.map(session => `<button class="history-item" data-action="open-session" data-id="${h(session.id)}" aria-label="Ouvrir la séance ${h(session.type)} du ${h(formatDate(session.completedAt))}"><span class="history-date-badge"><b>${new Date(session.completedAt).getDate()}</b><small>${formatDate(session.completedAt, { month: 'short' })}</small></span><span class="history-item-main"><span class="history-line"><b>Séance ${h(session.type)}</b><span class="type-pill type-${h(session.type).toLowerCase()}">${h(session.type)}</span></span><small>${session.exercises.length} exercices · ${formatDuration(session.durationSeconds)} · ${session.exercises.reduce((sum, ex) => sum + ex.sets.filter(set => set.completed).length, 0)} séries</small><span class="history-exercises">${session.exercises.map(exercise => h(exercise.name)).join(' · ')}</span></span><span class="row-chevron">›</span></button>`).join('');
+  const emptyMessage = selectedDate
+    ? `<div class="empty-state compact-empty"><span>▦</span><h3>Aucune séance ce jour-là.</h3><button class="button button-secondary" data-action="clear-calendar-filter">Voir tout l’historique</button></div>`
+    : `<div class="empty-state compact-empty"><span>▦</span><h3>Ton historique commence ici.</h3><p>Une séance terminée apparaîtra dans ce journal.</p><button class="button button-primary" data-action="start-workout" data-type="${nextType()}">Commencer la séance ${nextType()}</button></div>`;
+  return `<section class="history-summary"><div><span class="section-kicker">TON PARCOURS</span><h2>Chaque séance<br><em>compte.</em></h2><p>Retrouve tes entraînements et tes notes personnelles.</p></div><div class="history-total"><strong>${sessions.length}</strong><span>${sessions.length === 1 ? 'séance enregistrée' : 'séances enregistrées'}</span></div></section><div class="history-layout"><section class="panel calendar-panel">${calendarMarkup()}</section><section class="history-list"><div class="section-header"><div><span class="section-kicker">${selectedDate ? 'JOUR SÉLECTIONNÉ' : 'RÉCENTES'}</span><h3>${h(listTitle)}</h3></div><div class="history-list-actions">${selectedDate ? '<button class="button button-small button-ghost" data-action="clear-calendar-filter">Tout voir</button>' : ''}<button class="button button-small button-secondary" data-action="export">Exporter</button></div></div><p class="history-filter-count">${visibleSessions.length} séance${visibleSessions.length === 1 ? '' : 's'} affichée${visibleSessions.length === 1 ? '' : 's'}</p>${visibleSessions.length ? sessionCards : emptyMessage}</section></div>`;
 }
 
 function journalPage() {
   const linkedSession = data.sessions.find(session => session.id === journalSessionId);
+  const linkedEntry = linkedSession ? data.journalEntries.find(entry => entry.sessionId === linkedSession.id) : null;
+  const editingEntry = editingJournalId ? data.journalEntries.find(entry => entry.id === editingJournalId) : null;
+  const currentEntry = editingEntry || linkedEntry || null;
+  const currentSession = linkedSession || data.sessions.find(session => session.id === currentEntry?.sessionId);
+  const editing = Boolean(currentEntry);
   const entries = [...data.journalEntries].sort((a, b) => Date.parse(b.date) - Date.parse(a.date));
-  const pageMarkup = `<section class="page-intro journal-intro"><div><span class="section-kicker">ÉCOUTE & RÉCUPÉRATION</span><h2>Note ce que tu<br><em>ressens.</em></h2><p>Ton énergie, ton effort, tes observations et la suite que tu souhaites donner à ton entraînement.</p></div><div class="journal-icon-large">✎<small>TON JOURNAL PERSONNEL</small></div></section><form class="panel journal-form" data-form="journal"><div class="panel-heading"><div><span class="section-kicker">NOUVELLE NOTE</span><h3>Comment tu te sens aujourd’hui ?</h3></div><span class="journal-spark">✳</span></div><div class="journal-fields"><label class="field-label">Difficulté ressentie<select name="difficulty"><option value="">Choisir…</option><option>Très facile</option><option>Facile</option><option>Modérée</option><option>Difficile</option><option>Très difficile</option></select></label><label class="field-label">Niveau d’énergie<select name="energy"><option value="">Choisir…</option><option>Bas</option><option>Correct</option><option>Bon</option><option>Excellent</option></select></label><label class="field-label">Ressenti général<select name="mood"><option value="">Choisir…</option><option>Motivé·e</option><option>Serein·e</option><option>Fatigué·e</option><option>Fier·e</option><option>Mitigé·e</option></select></label><label class="field-label">Douleur ou gêne éventuelle<input name="pain" placeholder="Aucune, ou décris la gêne" /></label><label class="field-label field-full">Mes observations<textarea name="notes" rows="3" placeholder="Ce qui a bien marché, ce que tu veux retenir…"></textarea></label><label class="field-label field-full">Mon intention pour la prochaine séance<textarea name="nextGoal" rows="2" placeholder="Un objectif simple et réaliste…"></textarea></label></div><div class="form-footer"><small>Enregistré uniquement dans ce navigateur.</small><button class="button button-primary">Enregistrer cette note ${icon('arrow')}</button></div></form><section class="journal-history"><div class="section-header"><div><span class="section-kicker">TES REPÈRES</span><h3>Notes précédentes</h3></div><span class="muted">${entries.length} note${entries.length === 1 ? '' : 's'}</span></div>${entries.length ? entries.map(entry => `<article class="journal-entry"><div class="journal-entry-date"><b>${formatDate(entry.date, { day: 'numeric' })}</b><span>${formatDate(entry.date, { month: 'short', year: 'numeric' })}</span></div><div class="journal-entry-body"><div class="journal-badges">${entry.sessionType ? `<span>Séance ${h(entry.sessionType)}</span>` : ''}${entry.difficulty ? `<span>Effort : ${h(entry.difficulty)}</span>` : ''}${entry.energy ? `<span>Énergie : ${h(entry.energy)}</span>` : ''}${entry.mood ? `<span>${h(entry.mood)}</span>` : ''}</div>${entry.pain ? `<p class="pain-note">Gêne : ${h(entry.pain)}</p>` : ''}<p>${h(entry.notes || 'Aucune observation ajoutée.')}</p>${entry.nextGoal ? `<small>À suivre · ${h(entry.nextGoal)}</small>` : ''}</div></article>`).join('') : `<div class="empty-state compact-empty"><span>✎</span><h3>Fais une première note.</h3><p>Quelques mots suffisent pour mieux écouter ton corps.</p></div>`}</section>`;
-  return linkedSession ? pageMarkup.replace('<form class="panel journal-form"', `<p class="journal-link-note">Cette note sera associée à ta séance ${h(linkedSession.type)} du ${h(formatDate(linkedSession.completedAt, { day: 'numeric', month: 'long' }))}.</p><form class="panel journal-form"`) : pageMarkup;
+  const selectField = (name, label, options) => `<label class="field-label">${label}<select name="${name}"><option value="" ${currentEntry?.[name] ? '' : 'selected'}>Choisir…</option>${options.map(option => `<option value="${h(option)}" ${currentEntry?.[name] === option ? 'selected' : ''}>${h(option)}</option>`).join('')}</select></label>`;
+  const formMarkup = `<form class="panel journal-form ${editing ? 'journal-editing' : ''}" data-form="journal" data-entry-id="${h(currentEntry?.id || '')}"><div class="panel-heading"><div><span class="section-kicker">${editing ? 'MODIFIER LE RESSENTI' : 'NOUVELLE NOTE'}</span><h3>${editing ? 'Mettre à jour cette note' : 'Comment tu te sens aujourd’hui ?'}</h3></div><span class="journal-spark">✳</span></div><div class="journal-fields">${selectField('difficulty', 'Difficulté ressentie', ['Très facile', 'Facile', 'Modérée', 'Difficile', 'Très difficile'])}${selectField('energy', 'Niveau d’énergie', ['Bas', 'Correct', 'Bon', 'Excellent'])}${selectField('mood', 'Ressenti général', ['Motivé·e', 'Serein·e', 'Fatigué·e', 'Fier·e', 'Mitigé·e'])}<label class="field-label">Douleur ou gêne éventuelle<input name="pain" placeholder="Aucune, ou décris la gêne" value="${h(currentEntry?.pain || '')}" /></label><label class="field-label field-full">Mes observations<textarea name="notes" rows="3" placeholder="Ce qui a bien marché, ce que tu veux retenir…">${h(currentEntry?.notes || '')}</textarea></label><label class="field-label field-full">Mon intention pour la prochaine séance<textarea name="nextGoal" rows="2" placeholder="Un objectif simple et réaliste…">${h(currentEntry?.nextGoal || '')}</textarea></label></div><div class="form-footer"><small>Enregistré uniquement dans ce navigateur.</small><div class="journal-form-actions">${editing ? '<button type="button" class="button button-ghost" data-action="cancel-journal-edit">Annuler</button>' : ''}<button class="button button-primary">${editing ? 'Enregistrer les modifications' : `Enregistrer cette note ${icon('arrow')}`}</button></div></div></form>`;
+  const entriesMarkup = entries.length ? entries.map(entry => `<article class="journal-entry"><div class="journal-entry-date"><b>${formatDate(entry.date, { day: 'numeric' })}</b><span>${formatDate(entry.date, { month: 'short', year: 'numeric' })}</span></div><div class="journal-entry-body"><div class="journal-badges">${entry.sessionType ? `<span>Séance ${h(entry.sessionType)}</span>` : ''}${entry.difficulty ? `<span>Effort : ${h(entry.difficulty)}</span>` : ''}${entry.energy ? `<span>Énergie : ${h(entry.energy)}</span>` : ''}${entry.mood ? `<span>${h(entry.mood)}</span>` : ''}</div>${entry.pain ? `<p class="pain-note">Gêne : ${h(entry.pain)}</p>` : ''}<p>${h(entry.notes || 'Aucune observation ajoutée.')}</p>${entry.nextGoal ? `<small>À suivre · ${h(entry.nextGoal)}</small>` : ''}<button type="button" class="button button-small button-secondary journal-edit-button" data-action="edit-journal" data-id="${h(entry.id)}">Modifier le ressenti</button></div></article>`).join('') : `<div class="empty-state compact-empty"><span>✎</span><h3>Fais une première note.</h3><p>Quelques mots suffisent pour mieux écouter ton corps.</p></div>`;
+  const linkedNote = currentSession ? `<p class="journal-link-note">Cette note est associée à la séance ${h(currentSession.type)} du ${h(formatDate(currentSession.completedAt, { day: 'numeric', month: 'long' }))}.</p>` : '';
+  return `<section class="page-intro journal-intro"><div><span class="section-kicker">ÉCOUTE & RÉCUPÉRATION</span><h2>Note ce que tu<br><em>ressens.</em></h2><p>Ton énergie, ton effort, tes observations et la suite que tu souhaites donner à ton entraînement.</p></div><div class="journal-icon-large">✎<small>TON JOURNAL PERSONNEL</small></div></section>${linkedNote}${formMarkup}<section class="journal-history"><div class="section-header"><div><span class="section-kicker">TES REPÈRES</span><h3>Notes précédentes</h3></div><span class="muted">${entries.length} note${entries.length === 1 ? '' : 's'}</span></div>${entriesMarkup}</section>`;
 }
 
 function settingsPage() {
@@ -486,7 +542,7 @@ async function importBackup(file) {
     if (!confirmed) { setStatus('Import annulé. Tes données n’ont pas changé.'); return; }
     const restored = restoreDataSafely(incoming);
     data = { ...emptyData(), ...restored, goals: { ...emptyData().goals, ...restored.goals }, preferences: { ...emptyData().preferences, ...restored.preferences } };
-    selectedSession = null; page = 'home';
+    selectedSession = null; editingSessionId = null; editingJournalId = null; journalSessionId = null; page = 'home';
     render();
     showToast('Restauration réussie. Toutes les données ont été restaurées.');
   } catch (error) { setStatus(error.message, true); showToast(error.message, 'error'); }
@@ -495,12 +551,72 @@ async function importBackup(file) {
 
 function saveJournal(form) {
   const values = Object.fromEntries(new FormData(form).entries());
-  const linkedSession = data.sessions.find(session => session.id === journalSessionId);
-  const entry = { id: uid(), date: new Date().toISOString(), sessionId: linkedSession?.id || '', sessionType: linkedSession?.type || '', ...values };
-  const existingIndex = linkedSession ? data.journalEntries.findIndex(item => item.sessionId === linkedSession.id) : -1;
-  const journalEntries = existingIndex >= 0 ? data.journalEntries.map((item, index) => index === existingIndex ? { ...item, ...entry, id: item.id } : item) : [...data.journalEntries, entry];
+  const existing = data.journalEntries.find(item => item.id === form.dataset.entryId) || null;
+  const linkedSession = data.sessions.find(session => session.id === (existing?.sessionId || journalSessionId));
+  const entry = { id: existing?.id || uid(), date: existing?.date || new Date().toISOString(), sessionId: linkedSession?.id || existing?.sessionId || '', sessionType: linkedSession?.type || existing?.sessionType || '', ...values };
+  const existingIndex = existing ? data.journalEntries.findIndex(item => item.id === existing.id) : -1;
+  const journalEntries = existingIndex >= 0 ? data.journalEntries.map((item, index) => index === existingIndex ? entry : item) : [...data.journalEntries, entry];
   data = { ...data, journalEntries };
-  if (persist()) { journalSessionId = null; render(); showToast('Ta note a été enregistrée.'); }
+  if (persist()) { journalSessionId = null; editingJournalId = null; render(); showToast(existing ? 'Ton ressenti a été mis à jour.' : 'Ta note a été enregistrée.'); }
+}
+
+function saveEditedSession(form) {
+  const current = data.sessions.find(session => session.id === form.dataset.id);
+  if (!current) return;
+  const fields = new FormData(form);
+  const completedAt = new Date(String(fields.get('completedAt') || ''));
+  const durationSeconds = Number(fields.get('durationSeconds'));
+  const type = String(fields.get('type') || '');
+  if (Number.isNaN(completedAt.getTime()) || !['A', 'B'].includes(type) || !Number.isFinite(durationSeconds) || durationSeconds < 0) {
+    showToast('Vérifie la date, le type et la durée de la séance.', 'error');
+    return;
+  }
+  let exercises;
+  try {
+    exercises = current.exercises.map((exercise, exerciseIndex) => ({
+      ...exercise,
+      sets: exercise.sets.map((set, setIndex) => {
+        const reps = Number(fields.get(`reps-${exerciseIndex}-${setIndex}`));
+        const load = Number(fields.get(`load-${exerciseIndex}-${setIndex}`) || 0);
+        if (!Number.isFinite(reps) || reps < 0 || !Number.isFinite(load) || load < 0) throw new Error('Les répétitions et les charges doivent être des nombres positifs.');
+        return { ...set, reps, load, completed: fields.has(`completed-${exerciseIndex}-${setIndex}`) };
+      })
+    }));
+  } catch (error) {
+    showToast(error.message, 'error');
+    return;
+  }
+  const updated = { ...current, type, completedAt: completedAt.toISOString(), durationSeconds: Math.round(durationSeconds), note: String(fields.get('note') || '').trim(), exercises };
+  const nextData = {
+    ...data,
+    sessions: data.sessions.map(session => session.id === current.id ? updated : session),
+    journalEntries: data.journalEntries.map(entry => entry.sessionId === current.id ? { ...entry, date: updated.completedAt, sessionType: type } : entry)
+  };
+  if (persist(nextData)) {
+    editingSessionId = null;
+    if (page === 'history') { calendarCursor = new Date(updated.completedAt); calendarSelectedDate = dayKey(updated.completedAt); }
+    render();
+    showToast('La séance a été mise à jour.');
+  }
+}
+
+function deleteSession(sessionId) {
+  const session = data.sessions.find(item => item.id === sessionId);
+  if (!session) return;
+  const linkedJournal = data.journalEntries.some(entry => entry.sessionId === sessionId);
+  const detail = linkedJournal ? '\n\nLa note de ressenti associée restera dans ton journal, sans lien avec cette séance.' : '';
+  if (!confirm(`Supprimer la séance ${session.type} du ${formatDate(session.completedAt)} ?${detail}`)) return;
+  const journalEntries = data.journalEntries.map(entry => {
+    if (entry.sessionId !== sessionId) return entry;
+    const { sessionId: removedSessionId, ...keptEntry } = entry;
+    return { ...keptEntry, sessionType: '' };
+  });
+  if (persist({ ...data, sessions: data.sessions.filter(item => item.id !== sessionId), journalEntries })) {
+    selectedSession = null;
+    editingSessionId = null;
+    render();
+    showToast('La séance a été supprimée.');
+  }
 }
 
 app.addEventListener('click', event => {
@@ -508,7 +624,7 @@ app.addEventListener('click', event => {
   if (!target) return;
   const action = target.dataset.action;
   if (['close-modal', 'close-exercise'].includes(action) && event.target !== target && !target.classList.contains('modal-close')) return;
-  if (action === 'navigate') { event.preventDefault(); page = target.dataset.page; selectedSession = null; selectedExercise = null; finishReviewOpen = false; document.body.classList.remove('exercise-detail-modal-open'); window.scrollTo({ top: 0, behavior: 'instant' }); render(); }
+  if (action === 'navigate') { event.preventDefault(); page = target.dataset.page; selectedSession = null; editingSessionId = null; editingJournalId = null; journalSessionId = null; selectedExercise = null; finishReviewOpen = false; document.body.classList.remove('exercise-detail-modal-open'); window.scrollTo({ top: 0, behavior: 'instant' }); render(); }
   if (action === 'start-workout') startWorkout(target.dataset.type || nextType());
   if (action === 'resume') { page = data.activeWorkout?.phase === 'warmup' ? 'warmup' : 'training'; render(); }
   if (action === 'pause-workout') {
@@ -553,17 +669,48 @@ app.addEventListener('click', event => {
   if (action === 'cooldown-prev' || action === 'cooldown-next') { if (action === 'cooldown-prev') { recoveryStep = Math.max(0, recoveryStep - 1); routineTimer = resetTimer(routineTimer, routineDuration(cooldownSteps[recoveryStep])); render(); } else if (recoveryStep < cooldownSteps.length - 1) { recoveryStep += 1; routineTimer = resetTimer(routineTimer, routineDuration(cooldownSteps[recoveryStep])); render(); } else { routineTimer = createRestTimer(60); selectedSession = cooldownSessionId; page = 'history'; render(); } }
   if (action === 'skip-cooldown') { routineTimer = createRestTimer(60); selectedSession = cooldownSessionId; page = 'history'; render(); }
   if (action === 'open-exercise') { selectedExercise = target.dataset.id; document.body.classList.add('exercise-detail-modal-open'); render(); }
-  if (action === 'close-exercise' || action === 'close-modal') { selectedSession = null; selectedExercise = null; finishReviewOpen = false; document.body.classList.remove('exercise-detail-modal-open'); render(); }
+  if (action === 'close-exercise' || action === 'close-modal') { selectedSession = null; editingSessionId = null; selectedExercise = null; finishReviewOpen = false; document.body.classList.remove('exercise-detail-modal-open'); render(); }
   if (action === 'category') { libraryCategory = target.dataset.category; render(); }
   if (action === 'range') { range = target.dataset.range; render(); }
-  if (action === 'open-session') { selectedSession = target.dataset.id; selectedExercise = null; document.body.classList.remove('exercise-detail-modal-open'); render(); }
-  if (action === 'open-journal-for-session') { journalSessionId = target.dataset.id; selectedSession = null; page = 'journal'; window.scrollTo({ top: 0, behavior: 'instant' }); render(); }
-  if (action === 'calendar-month') { calendarCursor = new Date(calendarCursor.getFullYear(), calendarCursor.getMonth() + Number(target.dataset.delta), 1); render(); }
-  if (action === 'calendar-day') { const session = data.sessions.find(item => dayKey(item.completedAt) === target.dataset.date); if (session) { selectedSession = session.id; render(); } }
+  if (action === 'open-session') { selectedSession = target.dataset.id; editingSessionId = null; selectedExercise = null; document.body.classList.remove('exercise-detail-modal-open'); render(); }
+  if (action === 'edit-session') { selectedSession = target.dataset.id || selectedSession; editingSessionId = selectedSession; render(); }
+  if (action === 'cancel-session-edit') { editingSessionId = null; render(); }
+  if (action === 'delete-session') deleteSession(target.dataset.id || selectedSession);
+  if (action === 'open-journal-for-session') { journalSessionId = target.dataset.id; editingJournalId = data.journalEntries.find(entry => entry.sessionId === journalSessionId)?.id || null; selectedSession = null; page = 'journal'; window.scrollTo({ top: 0, behavior: 'instant' }); render(); }
+  if (action === 'edit-journal') { editingJournalId = target.dataset.id; journalSessionId = null; selectedSession = null; page = 'journal'; window.scrollTo({ top: 0, behavior: 'instant' }); render(); }
+  if (action === 'cancel-journal-edit') { editingJournalId = null; journalSessionId = null; render(); }
+  if (action === 'calendar-month') { calendarCursor = new Date(calendarCursor.getFullYear(), calendarCursor.getMonth() + Number(target.dataset.delta), 1); calendarSelectedDate = ''; render(); }
+  if (action === 'calendar-today') { calendarCursor = new Date(); calendarSelectedDate = ''; render(); }
+  if (action === 'clear-calendar-filter') { calendarSelectedDate = ''; render(); }
+  if (action === 'calendar-day') { calendarSelectedDate = target.dataset.date; render(); }
   if (action === 'theme') { data = { ...data, preferences: { ...data.preferences, theme: data.preferences.theme === 'dark' ? 'light' : 'dark' } }; persist(); render(); }
   if (action === 'set-theme') { data = { ...data, preferences: { ...data.preferences, theme: target.dataset.theme } }; persist(); render(); }
   if (action === 'export') exportBackup();
   if (action === 'choose-import') document.querySelector('#backup-file')?.click();
+});
+
+app.addEventListener('pointerover', event => {
+  const point = chartPointFrom(event.target);
+  if (point && !(event.relatedTarget instanceof Node && point.contains(event.relatedTarget))) showChartTooltip(point);
+});
+
+app.addEventListener('pointerout', event => {
+  const point = chartPointFrom(event.target);
+  if (!point || (event.relatedTarget instanceof Node && point.contains(event.relatedTarget)) || point.contains(document.activeElement)) return;
+  const tooltip = point.closest('.chart-shell')?.querySelector('.chart-tooltip');
+  if (tooltip) tooltip.hidden = true;
+});
+
+app.addEventListener('focusin', event => {
+  const point = chartPointFrom(event.target);
+  if (point) showChartTooltip(point);
+});
+
+app.addEventListener('focusout', event => {
+  const point = chartPointFrom(event.target);
+  if (!point || (event.relatedTarget instanceof Node && point.contains(event.relatedTarget))) return;
+  const tooltip = point.closest('.chart-shell')?.querySelector('.chart-tooltip');
+  if (tooltip) tooltip.hidden = true;
 });
 
 app.addEventListener('keydown', event => {
@@ -588,6 +735,11 @@ app.addEventListener('input', event => {
 });
 
 app.addEventListener('change', event => {
+  if (event.target.id === 'history-month-picker') {
+    const [year, month] = event.target.value.split('-').map(Number);
+    if (year && month >= 1 && month <= 12) { calendarCursor = new Date(year, month - 1, 1); calendarSelectedDate = ''; render(); }
+    return;
+  }
   if (event.target.id === 'weekly-target') { data = { ...data, goals: { ...data.goals, weeklyTarget: Number(event.target.value) } }; if (persist()) { render(); showToast('Objectif hebdomadaire mis à jour.'); } }
   if (event.target.id === 'records-exercise') { recordsExercise = event.target.value; render(); }
   if (event.target.id === 'default-rest-duration') { data = { ...data, preferences: { ...data.preferences, restSeconds: clampDuration(event.target.value) } }; if (persist()) { render(); showToast('Durée de repos enregistrée.'); } }
@@ -608,6 +760,7 @@ app.addEventListener('change', event => {
 
 app.addEventListener('submit', event => {
   if (event.target.matches('[data-form="journal"]')) { event.preventDefault(); saveJournal(event.target); }
+  if (event.target.matches('[data-form="edit-session"]')) { event.preventDefault(); saveEditedSession(event.target); }
 });
 
 render();

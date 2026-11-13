@@ -18,6 +18,10 @@ Les séances, notes et préférences sont stockées dans `localStorage` sous la 
 
 Chaque navigateur et chaque appareil garde son propre stockage. Il faut donc transférer le fichier de sauvegarde pour déplacer les données.
 
+## Historique, ressentis et graphiques
+
+Dans **Historique**, ouvre une séance pour modifier sa date, son type, sa durée, ses notes, ses répétitions, ses charges ou les séries validées. Tu peux aussi la supprimer; un ressenti qui lui était associé est conservé dans le journal et devient indépendant. Le calendrier propose les flèches de mois, un sélecteur de mois, un retour à aujourd’hui et un filtre par journée. Dans **Journal**, les ressentis enregistrés peuvent être modifiés depuis leur fiche. Les points des graphiques affichent leur date et leur valeur au survol de la souris ou au clavier.
+
 ## GitHub Pages
 
 Le workflow `.github/workflows/deploy.yml` publie les fichiers statiques à chaque push sur `main` et lors d'un déclenchement manuel. Active **Settings → Pages → Build and deployment → GitHub Actions** dans le dépôt. Les chemins relatifs (`./styles.css`, `./src/main.js`) fonctionnent aussi sous le sous-chemin du dépôt GitHub Pages.
